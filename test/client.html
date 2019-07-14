@@ -1,0 +1,179 @@
+<html>
+  <body>
+    oh hey there
+    <pre id="outgoing"></pre>
+    <script src="simple-peer.min.js"></script>
+    <script>
+      /**
+       * initiator generates an offer in 'signal'
+       * send the offer through socket to all other clients. (initiator ignores offer)
+       * receiver passes offer to signal()
+       * receiver generates answer in 'signal'
+       * receiver sends answer through socket to client that generated the offer
+       * initiator receives answer and passes it into signal()
+       * Connection!
+       */
+
+       /**
+        * Get client count - 1 (to exclude self)
+        * Create client count - 1 number of initiators
+        * 
+        */
+      const userId = Math.random()
+      const ws = new WebSocket('ws://localhost:8080');
+
+      // Inititator client instances for initially connect
+      const origin = {};
+      // Receiver client instances for connecting to newer initiator client instances
+      const incoming = {};
+
+      // SDP storages to avoid connecting to oneself
+      let initiatorSdps = [];
+      let receiverSdps = [];
+
+      // Reusable initiator code
+      function initiator() {
+        const initiator = new SimplePeer({ initiator: true, trickle: false });
+
+        initiator.on('error', err => console.log('error', err));
+
+        initiator.on('signal', data => {
+          console.log('SIGNAL', data);
+          // Get SDP from initial construction
+          if (!initiatorSdps.includes(data.sdp) && data.type === 'offer') {
+            // save 
+            initiatorSdps.push(data.sdp);
+            console.log(initiatorSdps)
+            // Send offer to other clients over socket
+            ws.send(JSON.stringify({
+              id: userId,
+              connection: data
+            }));
+          }
+        });
+
+        // Function run upon successfully connecting to peer
+        initiator.on('connect', () => {
+          console.log('CONNECT')
+          setInterval(() => {
+            console.log('sent from initiator');
+            initiator.send('sent from initiator ' + initiator._id)
+          }, 3000)
+        });
+
+        // Function run upon receiving data from peer
+        initiator.on('data', data => {
+          console.log('data: ' + data)
+        });
+
+        // Function run upon closing connection with peer
+        initiator.on('close', () => {
+          console.log('initiator disconnected')
+          initiator.destroy()
+          delete origin[initiator._id];
+        });
+
+        return initiator;
+      }
+
+      // Reusable receiver code
+      function receiver({ id, connection }) {
+        const receiver = new SimplePeer({ initiator: false, trickle: false });
+
+        receiver.signal(connection);
+
+        receiver.on('error', err => console.log('error', err))
+
+        receiver.on('signal', data => {
+          if (!receiverSdps.includes(data.sdp) && data.type === 'answer') {
+            console.log('RECEIVER SIG', data)
+            receiverSdps.push(data.sdp)
+
+            ws.send(JSON.stringify({
+              id,
+              connection: data
+            }));
+          }
+        });
+
+        receiver.on('connect', () => {
+          console.log('CONNECT')
+          setInterval(() => {
+            console.log('sent from receiver');
+            receiver.send('send from receive ' + receiver._id)
+          }, 3000)
+        });
+
+        receiver.on('data', data => {
+          console.log('data: ' + data)
+        });
+
+        receiver.on('close', () => {
+          console.log('receiver disconnected')
+          receiver.destroy()
+          delete incoming[receiver._id];
+        });
+
+        return receiver;
+      }
+
+      ws.addEventListener('open', () => {
+        console.log('OPEN')
+        ws.send(JSON.stringify({
+          request: 'clientCount'
+        }));
+      });
+
+      ws.addEventListener('message', ({ data }) => {
+        let json;
+
+        try {
+          json = JSON.parse(data);
+        } catch (err) {
+          console.error(err);
+        }
+
+        // Accept offer and make answer
+        if (json && json.id && json.connection) {
+          switch (json.connection.type) {
+            // Initiating a connection between self and another client
+            case 'offer': {
+              if (!initiatorSdps.includes(json.connection.sdp) && !Object.keys(incoming).includes(json.id)) {
+                console.log(json)
+                // Create a receiver instance to connect to offer
+                const receiverInstance = receiver(json);
+                incoming[json.id] = receiverInstance;
+              }
+              break;
+            }
+            case 'answer':
+              if (!receiverSdps.includes(json.connection.sdp) && json.id === userId) {
+                // Find an initiator that has not been used yet and complete the connection
+                for (initiator in origin) {
+                  if (!origin[initiator].answered) {
+                    origin[initiator].instance.signal(json.connection);
+                    origin[initiator].answered = true;
+                    break;
+                  }
+                }
+              }
+              break;
+            default:
+              break;
+          }
+        } else if (json.clientCount) {
+          // Create initiators based on the amount of clients already connected. Exclude self.
+          for (let i = 0; i < json.clientCount - 1; i = i + 1) {
+            const initiatorInstance = initiator();
+
+            // Store initiator instance into map
+            origin[initiatorInstance._id] = {
+              instance: initiatorInstance,
+              answered: false
+            };
+          }
+        }
+      });
+    </script>
+  </body>
+</html>

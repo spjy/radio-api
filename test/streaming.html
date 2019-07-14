@@ -1,0 +1,85 @@
+<html>
+  <div>
+    <audio></audio>
+    <button id="ptt">PTT</button>
+    <button id="ptr">PTR</button>
+  </div>
+  <script src="simple-peer.min.js"></script>
+  <script>
+    // get video/voice stream
+
+    /**
+     * if i want to transmit to all clients, on ptt keypressdown, enable mediastreamtrack.
+     * transmit the channel being sent to. the socket will send to the clients that are on the channel
+     * on keypressup, disable mediastreamtrack
+     */
+
+    async function getMedia(peer) {
+      let stream = null;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        gotMedia(stream);
+      } catch(err) {
+        /* handle the error */
+      }
+    }
+
+    const stream = getMedia();
+
+    function gotMedia (stream) {
+      var peer1 = new SimplePeer({ initiator: true })
+      var peer2 = new SimplePeer({ stream: stream })
+
+      peer1.on('signal', data => {
+        peer2.signal(data)
+      })
+
+      peer1.on('stream', stream => {
+        // got remote video stream, now let's show it in a video tag
+        var audio = document.querySelector('audio')
+
+        if ('srcObject' in audio) {
+          audio.srcObject = stream
+        } else {
+          audio.src = window.URL.createObjectURL(stream) // for older browsers
+        }
+
+        audio.play()
+      })
+
+      peer2.on('signal', data => {
+        peer1.signal(data)
+      })
+
+      peer2.on('stream', stream => {
+        // got remote video stream, now let's show it in a video tag
+        var audio = document.querySelector('audio')
+
+        if ('srcObject' in audio) {
+          audio.srcObject = stream
+        } else {
+          audio.src = window.URL.createObjectURL(stream) // for older browsers
+        }
+
+        audio.play()
+      })
+
+      document.querySelector('#ptt').addEventListener('click', function() {
+        if (stream) {
+          stream.getAudioTracks()[0].enabled = true;
+          console.log(str.getAudioTracks()[0]);
+        }
+      });
+
+      document.querySelector('#ptr').addEventListener('click', () => {
+        if (stream) {
+          stream.getAudioTracks()[0].enabled = false;
+        }
+      });
+    }
+
+    gotMedia();
+  </script>
+</html>
