@@ -47,7 +47,11 @@ const wss = new WebSocket.Server({
 });
 
 wss.on('connection', (ws, req) => {
-  ws.send(JSON.stringify(config.community))
+  ws.send(JSON.stringify({
+    type: 'community',
+    payload: config.community
+  }));
+
   ws.on('message', (data) => {
     let json;
 
