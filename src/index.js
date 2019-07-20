@@ -43,34 +43,44 @@ const wss = new WebSocket.Server({
     // should not be compressed.
   }
 }, () => {
-  console.log('WSS started.');
+  console.log(`WSS started. ${config.port}`);
 });
 
 wss.on('connection', (ws, req) => {
-  ws.send(JSON.stringify({
-    type: 'community',
-    payload: config.community
-  }));
-
   ws.on('message', (data) => {
-    let json;
-
     try {
-      json = JSON.parse(data);
+      const json = JSON.parse(data);
+
+      console.log(json);
+
+      switch (json.type) {
+        case 'connection': {
+          wss.clients.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(data);
+            }
+          });
+          break;
+        }
+        case 'clientCount': {
+          ws.send(JSON.stringify({
+            type: 'clientCount',
+            payload: wss.clients.size
+          }));
+          break;
+        }
+        case 'community': {
+          ws.send(JSON.stringify({
+            type: 'community',
+            payload: config.community
+          }));
+          break;
+        }
+        default:
+          break;
+      }
     } catch (err) {
       console.error(err);
-    }
-
-    if (json && json.connection) {
-      wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(data);
-        }
-      });
-    } else if (json && json.request) {
-      if (json.request === 'clientCount') {
-        ws.send(JSON.stringify({clientCount: wss.clients.size}));
-      }
     }
   });
 });

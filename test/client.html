@@ -20,7 +20,7 @@
         * 
         */
       const userId = Math.random()
-      const ws = new WebSocket('ws://localhost:8080');
+      const ws = new WebSocket('ws://localhost:8081');
 
       // Inititator client instances for initially connect
       const origin = {};
@@ -46,8 +46,11 @@
             console.log(initiatorSdps)
             // Send offer to other clients over socket
             ws.send(JSON.stringify({
-              id: userId,
-              connection: data
+              type: 'connection',
+              payload: {
+                id: userId,
+                connection: data
+              }
             }));
           }
         });
@@ -80,6 +83,8 @@
       function receiver({ id, connection }) {
         const receiver = new SimplePeer({ initiator: false, trickle: false });
 
+        console.log(id, connection)
+
         receiver.signal(connection);
 
         receiver.on('error', err => console.log('error', err))
@@ -90,8 +95,11 @@
             receiverSdps.push(data.sdp)
 
             ws.send(JSON.stringify({
-              id,
-              connection: data
+              type: 'connection',
+              payload: {
+                id,
+                connection: data
+              }
             }));
           }
         });
@@ -120,58 +128,62 @@
       ws.addEventListener('open', () => {
         console.log('OPEN')
         ws.send(JSON.stringify({
-          request: 'clientCount'
+          type: 'clientCount'
         }));
       });
 
       ws.addEventListener('message', ({ data }) => {
-        let json;
-
         try {
-          json = JSON.parse(data);
-        } catch (err) {
-          console.error(err);
-        }
+          const json = JSON.parse(data);
 
-        // Accept offer and make answer
-        if (json && json.id && json.connection) {
-          switch (json.connection.type) {
-            // Initiating a connection between self and another client
-            case 'offer': {
-              if (!initiatorSdps.includes(json.connection.sdp) && !Object.keys(incoming).includes(json.id)) {
-                console.log(json)
-                // Create a receiver instance to connect to offer
-                const receiverInstance = receiver(json);
-                incoming[json.id] = receiverInstance;
+          switch (json.type) {
+            case 'connection': {
+              // Accept offer and make answer
+              switch (json.payload.connection.type) {
+                // Initiating a connection between self and another client
+                case 'offer': {
+                  if (!initiatorSdps.includes(json.payload.connection.sdp) && !Object.keys(incoming).includes(json.payload.id)) {
+                    // Create a receiver instance to connect to offer
+                    const receiverInstance = receiver(json.payload);
+                    incoming[json.payload.id] = receiverInstance;
+                  }
+                  break;
+                }
+                case 'answer':
+                  if (!receiverSdps.includes(json.payload.connection.sdp) && json.payload.id === userId) {
+                    // Find an initiator that has not been used yet and complete the connection
+                    for (initiator in origin) {
+                      if (!origin[initiator].answered) {
+                        origin[initiator].instance.signal(json.payload.connection);
+                        origin[initiator].answered = true;
+                        break;
+                      }
+                    }
+                  }
+                  break;
+                default:
+                  break;
               }
               break;
             }
-            case 'answer':
-              if (!receiverSdps.includes(json.connection.sdp) && json.id === userId) {
-                // Find an initiator that has not been used yet and complete the connection
-                for (initiator in origin) {
-                  if (!origin[initiator].answered) {
-                    origin[initiator].instance.signal(json.connection);
-                    origin[initiator].answered = true;
-                    break;
-                  }
-                }
+            case 'clientCount': {
+              // Create initiators based on the amount of clients already connected. Exclude self.
+              for (let i = 0; i < json.payload - 1; i = i + 1) {
+                const initiatorInstance = initiator();
+
+                // Store initiator instance into map
+                origin[initiatorInstance._id] = {
+                  instance: initiatorInstance,
+                  answered: false
+                };
               }
               break;
+            }
             default:
               break;
           }
-        } else if (json.clientCount) {
-          // Create initiators based on the amount of clients already connected. Exclude self.
-          for (let i = 0; i < json.clientCount - 1; i = i + 1) {
-            const initiatorInstance = initiator();
-
-            // Store initiator instance into map
-            origin[initiatorInstance._id] = {
-              instance: initiatorInstance,
-              answered: false
-            };
-          }
+        } catch (err) {
+          console.error(err);
         }
       });
     </script>
