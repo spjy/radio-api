@@ -6,10 +6,15 @@ community:
     - Police South
     - County North
     - Highway Patrol
-tones:
-  Station 1:
-    file: station1.wav
-  Emergency Traffic:
-    file: emergency.wav
-    marker: emergency_marker.wav
-port: 8080
+    - County Fire
+  tones:
+    Station 1:
+      file: station1.wav
+    Emergency Traffic:
+      file: emergency.wav
+      marker: emergency_marker.wav
+    Volunteer Fire:
+      file: volunteer_fire.wav
+    Volunteer EMS:
+      file: volunteer_ems.wav
+port: 8081

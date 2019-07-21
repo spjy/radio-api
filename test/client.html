@@ -19,7 +19,8 @@
         * Create client count - 1 number of initiators
         * 
         */
-      const userId = Math.random()
+      const userId = Math.random().toString()
+      console.log(userId)
       const ws = new WebSocket('ws://localhost:8081');
 
       // Inititator client instances for initially connect
@@ -35,20 +36,20 @@
       function initiator() {
         const initiator = new SimplePeer({ initiator: true, trickle: false });
 
+        console.log('initiator constructed');
+
         initiator.on('error', err => console.log('error', err));
 
         initiator.on('signal', data => {
-          console.log('SIGNAL', data);
           // Get SDP from initial construction
-          if (!initiatorSdps.includes(data.sdp) && data.type === 'offer') {
+          if (!initiatorSdps.includes(data.sdp)) {
             // save 
             initiatorSdps.push(data.sdp);
-            console.log(initiatorSdps)
             // Send offer to other clients over socket
             ws.send(JSON.stringify({
               type: 'connection',
               payload: {
-                id: userId,
+                id: userId, // own user id
                 connection: data
               }
             }));
@@ -57,22 +58,21 @@
 
         // Function run upon successfully connecting to peer
         initiator.on('connect', () => {
-          console.log('CONNECT')
+          console.log('CONNECT');
           setInterval(() => {
-            console.log('sent from initiator');
-            initiator.send('sent from initiator ' + initiator._id)
+            initiator.send(initiator._id);
           }, 3000)
         });
 
         // Function run upon receiving data from peer
         initiator.on('data', data => {
-          console.log('data: ' + data)
+          console.log('initiator: received from: ' + data);
         });
 
         // Function run upon closing connection with peer
         initiator.on('close', () => {
-          console.log('initiator disconnected')
-          initiator.destroy()
+          console.log('receiver disconnected');
+          initiator.destroy();
           delete origin[initiator._id];
         });
 
@@ -83,42 +83,42 @@
       function receiver({ id, connection }) {
         const receiver = new SimplePeer({ initiator: false, trickle: false });
 
-        console.log(id, connection)
+        console.log('initiator constructed')
 
         receiver.signal(connection);
 
         receiver.on('error', err => console.log('error', err))
 
         receiver.on('signal', data => {
-          if (!receiverSdps.includes(data.sdp) && data.type === 'answer') {
+          if (!receiverSdps.includes(data.sdp)) {
             console.log('RECEIVER SIG', data)
             receiverSdps.push(data.sdp)
 
             ws.send(JSON.stringify({
               type: 'connection',
               payload: {
-                id,
-                connection: data
+                id, // offer id
+                fromId: userId, // own id
+                connection: data // rtc data
               }
             }));
           }
         });
 
         receiver.on('connect', () => {
-          console.log('CONNECT')
+          console.log('CONNECT');
           setInterval(() => {
-            console.log('sent from receiver');
-            receiver.send('send from receive ' + receiver._id)
+            receiver.send(receiver._id)
           }, 3000)
         });
 
         receiver.on('data', data => {
-          console.log('data: ' + data)
+          console.log('receiver: received from: ' + data);
         });
 
         receiver.on('close', () => {
-          console.log('receiver disconnected')
-          receiver.destroy()
+          console.log('receiver disconnected');
+          receiver.destroy();
           delete incoming[receiver._id];
         });
 
@@ -126,7 +126,8 @@
       }
 
       ws.addEventListener('open', () => {
-        console.log('OPEN')
+        console.log('OPEN');
+        // Get client count for initiator amount
         ws.send(JSON.stringify({
           type: 'clientCount'
         }));
@@ -142,25 +143,39 @@
               switch (json.payload.connection.type) {
                 // Initiating a connection between self and another client
                 case 'offer': {
+                  // Avoid accepting own 
                   if (!initiatorSdps.includes(json.payload.connection.sdp) && !Object.keys(incoming).includes(json.payload.id)) {
+                    console.log(`offer from ${json.payload.id}`);
                     // Create a receiver instance to connect to offer
                     const receiverInstance = receiver(json.payload);
                     incoming[json.payload.id] = receiverInstance;
                   }
                   break;
                 }
-                case 'answer':
-                  if (!receiverSdps.includes(json.payload.connection.sdp) && json.payload.id === userId) {
+                case 'answer': {
+                  // Avoid accepting own SDP, answer only answers from own's offers
+                  if (!receiverSdps.includes(json.payload.connection.sdp) && !Object.keys(origin).includes(json.payload.fromId) && json.payload.id === userId) {
+                    console.log(`answer from ${json.payload.fromId}`);
+
                     // Find an initiator that has not been used yet and complete the connection
-                    for (initiator in origin) {
+                    Object.keys(origin).some((initiator) => {
                       if (!origin[initiator].answered) {
+                        // If not answered yet, make this initiator answer the receiver
                         origin[initiator].instance.signal(json.payload.connection);
                         origin[initiator].answered = true;
-                        break;
+
+                        // Rename key to have the ID of the incoming client
+                        origin[json.payload.fromId] = origin[initiator];
+
+                        delete origin[initiator];
+
+                        return true;
                       }
-                    }
+                      return false;
+                    });
                   }
                   break;
+                }
                 default:
                   break;
               }
